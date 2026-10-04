@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/vue-query'
 import { getDashboard, getRuns } from '@/api/http'
 import MetricPanel from '@/components/MetricPanel.vue'
 import StatusTag from '@/components/StatusTag.vue'
+import ApprovalEvidence from '@/components/ApprovalEvidence.vue'
 
 const { data: dashboard, isLoading } = useQuery({
   queryKey: ['dashboard'],
@@ -19,19 +20,19 @@ const { data: runs } = useQuery({
   <a-spin :loading="isLoading" style="width: 100%">
     <section class="page-intro">
       <div>
-        <h2>今日视觉回归态势</h2>
-        <p>聚合运行差异、审批积压和高风险页面，优先处理阻断发布的视觉变化。</p>
+        <h2>冻结期视觉回归态势</h2>
+        <p>审批结果以先落地且通过规则版本、有效基线核对的一方为准；冲突只留说明，证据在各页面保持一致。</p>
       </div>
-      <router-link to="/runs">
-        <a-button type="primary"><icon-upload /> 新建批量运行</a-button>
+      <router-link to="/approvals">
+        <a-button type="primary"><icon-check-circle /> 进入审批队列</a-button>
       </router-link>
     </section>
 
     <div class="metric-grid">
-      <MetricPanel label="待审批运行" :value="dashboard?.pendingReview ?? 0" note="其中 2 条影响发布" tone="orange" />
-      <MetricPanel label="今日已批准" :value="dashboard?.approvedToday ?? 0" note="均记录批准原因" tone="green" />
-      <MetricPanel label="高风险差异" :value="dashboard?.highRisk ?? 0" note="差异率高于 5%" tone="red" />
-      <MetricPanel label="有效基线" :value="dashboard?.activeBaselines ?? 0" note="覆盖 6 个关键页面" tone="blue" />
+      <MetricPanel label="待审批运行" :value="dashboard?.pendingReview ?? 0" note="含跨窗口并发提交" tone="orange" />
+      <MetricPanel label="规则失效待重算" :value="dashboard?.staleRuns ?? 0" note="规则升级后原结果失效" tone="red" />
+      <MetricPanel label="冲突说明待处理" :value="dashboard?.openConflicts ?? 0" note="未覆盖结论或基线" tone="orange" />
+      <MetricPanel label="冻结批次（原证据）" :value="dashboard?.lockedBatches ?? 0" note="锁定后不受规则变化影响" tone="blue" />
     </div>
 
     <div class="dashboard-grid">
@@ -58,11 +59,11 @@ const { data: runs } = useQuery({
         <template #title>发布阻断项</template>
         <template #extra><router-link to="/approvals">查看队列</router-link></template>
         <div class="blocker-list">
-          <div v-for="run in runs?.filter((item) => item.status === 'pending').slice(0, 4)" :key="run.id" class="blocker-row">
+          <div v-for="run in runs?.filter((item) => item.status === 'pending' || item.status === 'stale').slice(0, 4)" :key="run.id" class="blocker-row">
             <div class="severity-line" :class="{ high: run.mismatchRate >= 5 }" />
             <div class="blocker-main">
               <strong>{{ run.page }}</strong>
-              <span>{{ run.device }} · {{ run.build }}</span>
+              <span>{{ run.device }} · 规则 v{{ run.rulesVersion ?? '-' }} · {{ run.build }}</span>
             </div>
             <b class="mismatch">{{ run.mismatchRate.toFixed(2) }}%</b>
             <StatusTag :status="run.status" />
@@ -78,13 +79,17 @@ const { data: runs } = useQuery({
         <template #columns>
           <a-table-column title="运行" data-index="name" />
           <a-table-column title="页面" data-index="page" />
-          <a-table-column title="设备 / 主题" data-index="device" />
-          <a-table-column title="构建" data-index="build" />
+          <a-table-column title="规则版本" :width="90">
+            <template #cell="{ record }">v{{ record.rulesVersion ?? '-' }}</template>
+          </a-table-column>
           <a-table-column title="差异率">
             <template #cell="{ record }">{{ record.mismatchRate.toFixed(2) }}%</template>
           </a-table-column>
           <a-table-column title="状态">
             <template #cell="{ record }"><StatusTag :status="record.status" /></template>
+          </a-table-column>
+          <a-table-column title="审批结果与依据" :width="300">
+            <template #cell="{ record }"><ApprovalEvidence :run="record" compact /></template>
           </a-table-column>
           <a-table-column title="操作">
             <template #cell="{ record }"><router-link :to="`/runs/${record.id}`">打开评审</router-link></template>

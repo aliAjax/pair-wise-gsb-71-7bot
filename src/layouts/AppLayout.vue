@@ -10,6 +10,7 @@ const menuItems = [
   { key: '/runs', label: '回归运行', icon: 'icon-apps' },
   { key: '/approvals', label: '审批队列', icon: 'icon-check-circle' },
   { key: '/baselines', label: '历史基线', icon: 'icon-history' },
+  { key: '/freeze', label: '发布冻结批次', icon: 'icon-lock' },
   { key: '/rules', label: '忽略规则', icon: 'icon-filter' },
   { key: '/reports', label: '结果与导出', icon: 'icon-download' },
 ]
@@ -25,6 +26,7 @@ const pageTitle = computed(() => {
     '/runs': '视觉回归运行',
     '/approvals': '审批队列',
     '/baselines': '历史基线',
+    '/freeze': '发布冻结批次',
     '/rules': '忽略规则',
     '/reports': '结果与导出',
   }

@@ -186,6 +186,7 @@ const submitImport = async () => {
           <a-option value="approved">已批准</a-option>
           <a-option value="rejected">已驳回</a-option>
           <a-option value="merged">已合并</a-option>
+          <a-option value="stale">规则失效待重算</a-option>
         </a-select>
       </a-grid-item>
     </a-grid>
@@ -238,7 +239,20 @@ const submitImport = async () => {
         <a-table-column title="差异区域" :width="100">
           <template #cell="{ record }">{{ record.regions.length }} 处</template>
         </a-table-column>
-        <a-table-column title="状态" :width="100">
+        <a-table-column title="规则 / 冲突" :width="150">
+          <template #cell="{ record }">
+            <a-tag size="small" :color="record.status === 'stale' ? 'purple' : 'gray'">
+              规则 v{{ record.rulesVersion ?? '-' }}
+            </a-tag>
+            <div v-if="record.conflict" class="evidence-cell">
+              <span class="conflict-line">冲突说明已留痕</span>
+            </div>
+            <div v-if="record.lockedBatchId" class="evidence-cell">
+              <span class="locked-line"><icon-lock /> {{ record.lockedBatchId }}</span>
+            </div>
+          </template>
+        </a-table-column>
+        <a-table-column title="状态" :width="110">
           <template #cell="{ record }"><StatusTag :status="record.status" /></template>
         </a-table-column>
         <a-table-column title="操作" :width="110" fixed="right">

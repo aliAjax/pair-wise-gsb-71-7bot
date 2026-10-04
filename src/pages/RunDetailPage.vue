@@ -5,14 +5,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { Message } from '@arco-design/web-vue'
 import DiffCanvas from '@/components/DiffCanvas.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { getRun, reviewRun } from '@/api/http'
+import ApprovalEvidence from '@/components/ApprovalEvidence.vue'
+import { getBaselines, getMeta, getRun, recomputeRun, reviewRun } from '@/api/http'
 import { useReviewStore } from '@/stores/review'
-import type { DifferenceRegion, ReviewCategory } from '@/types'
+import type { DifferenceRegion, ReviewCategory, ReviewRole } from '@/types'
 
 interface ReviewForm {
   category: ReviewCategory
   decision: 'approved' | 'rejected'
   reviewer: string
+  role: ReviewRole
   reason: string
 }
 
@@ -27,6 +29,7 @@ const form = reactive<ReviewForm>({
   category: 'design-change',
   decision: 'approved',
   reviewer: '林默',
+  role: 'reviewer',
   reason: '',
 })
 
@@ -34,6 +37,30 @@ const { data: run, isLoading } = useQuery({
   queryKey: computed(() => ['run', runId.value]),
   queryFn: () => getRun(runId.value),
 })
+
+const { data: meta } = useQuery({ queryKey: ['meta'], queryFn: getMeta })
+
+const { data: baselines } = useQuery({ queryKey: ['baselines', 'all'], queryFn: () => getBaselines() })
+
+// 当前有效基线，以服务端数据为准；审批前必须与它核对
+const activeBaseline = computed(() =>
+  baselines.value?.find(
+    (item) =>
+      run.value &&
+      item.projectId === run.value.projectId &&
+      item.page === run.value.page &&
+      item.device === run.value.device &&
+      item.theme === run.value.theme &&
+      item.active,
+  ),
+)
+
+const rulesBehind = computed(
+  () => (run.value?.rulesVersion ?? 0) < (meta.value?.rulesVersion ?? 0),
+)
+const baselineBehind = computed(
+  () => Boolean(run.value && activeBaseline.value && run.value.baselineVersion !== activeBaseline.value.version),
+)
 
 watch(
   run,
@@ -57,15 +84,51 @@ const suspiciousPixels = computed(() =>
     .reduce((total, region) => total + region.pixels, 0),
 )
 
+const refreshAll = async () => {
+  await queryClient.invalidateQueries({ queryKey: ['run', runId.value] })
+  await queryClient.invalidateQueries({ queryKey: ['runs'] })
+  await queryClient.invalidateQueries({ queryKey: ['baselines'] })
+  await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+  await queryClient.invalidateQueries({ queryKey: ['meta'] })
+}
+
 const reviewMutation = useMutation({
-  mutationFn: (payload: ReviewForm) => reviewRun(runId.value, payload),
-  onSuccess: async (updated) => {
-    Message.success(updated.review?.decision === 'approved' ? '审批通过，新基线已留痕' : '已驳回归并保留原基线')
-    await queryClient.invalidateQueries({ queryKey: ['run', runId.value] })
-    await queryClient.invalidateQueries({ queryKey: ['runs'] })
-    await queryClient.invalidateQueries({ queryKey: ['baselines'] })
-    await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+  mutationFn: (payload: ReviewForm) =>
+    reviewRun(runId.value, {
+      category: payload.category,
+      decision: payload.decision,
+      reviewer: payload.reviewer,
+      role: payload.role,
+      reason: payload.reason,
+      // 窗口中看到的规则版本与有效基线，提交给服务端复核
+      expectedRulesVersion: meta.value?.rulesVersion ?? 0,
+      expectedBaselineVersion: activeBaseline.value?.version ?? run.value?.baselineVersion ?? '',
+    }),
+  onSuccess: async (result) => {
+    if (result.conflict) {
+      Message.warning(`审批未生效：${result.conflict.message}`)
+      await refreshAll()
+      return
+    }
+    Message.success(
+      result.run.review?.decision === 'approved'
+        ? '审批通过，新基线已按当前规则版本与有效基线留痕'
+        : '已驳回并保留原基线',
+    )
+    await refreshAll()
     await router.push('/approvals')
+  },
+  onError: async (error: Error) => {
+    Message.error(error.message)
+    await refreshAll()
+  },
+})
+
+const recomputeMutation = useMutation({
+  mutationFn: () => recomputeRun(runId.value),
+  onSuccess: async () => {
+    Message.success('已按当前忽略规则版本重新计算差异，运行重新进入待审批')
+    await refreshAll()
   },
   onError: (error: Error) => Message.error(error.message),
 })
@@ -87,7 +150,22 @@ const submitReview = () => {
     Message.warning('请填写审批原因')
     return
   }
+  if (run.value?.status === 'stale' || rulesBehind.value) {
+    Message.warning('规则已变化，请先重新计算运行再审批')
+    return
+  }
   reviewMutation.mutate({ ...form })
+}
+
+const roleNames: Record<ReviewRole, string> = {
+  reviewer: '林默',
+  'release-manager': '高岑',
+}
+
+const switchRole = (role: string | number | boolean) => {
+  const next = String(role) as ReviewRole
+  form.role = next
+  form.reviewer = roleNames[next]
 }
 </script>
 
@@ -99,16 +177,34 @@ const submitReview = () => {
           <a-space>
             <h2>{{ run.name }}</h2>
             <StatusTag :status="run.status" />
+            <a-tag v-if="run.lockedBatchId" color="arcoblue"><icon-lock /> {{ run.lockedBatchId }}</a-tag>
           </a-space>
           <p>{{ run.page }} · {{ run.device }} · {{ run.theme === 'light' ? '浅色主题' : '深色主题' }}</p>
         </div>
         <a-space>
           <a-button @click="router.push('/runs')"><icon-left /> 返回列表</a-button>
-          <a-button type="primary" :loading="reviewMutation.isPending.value" @click="submitReview">
+          <a-button
+            v-if="run.status === 'stale' || rulesBehind"
+            type="outline"
+            :loading="recomputeMutation.isPending.value"
+            @click="recomputeMutation.mutate()"
+          >
+            <icon-refresh /> 按当前规则重算
+          </a-button>
+          <a-button
+            type="primary"
+            :loading="reviewMutation.isPending.value"
+            :disabled="Boolean(run.lockedBatchId)"
+            @click="submitReview"
+          >
             <icon-check /> 提交审批
           </a-button>
         </a-space>
       </section>
+
+      <a-alert v-if="run.lockedBatchId" type="info" style="margin-bottom: 12px">
+        运行已锁定到发布冻结批次，继续使用批准时的规则版本与基线证据，规则后续变化不影响本批次。
+      </a-alert>
 
       <div class="run-facts">
         <div><span>差异率</span><strong :class="{ danger: run.mismatchRate >= 5 }">{{ run.mismatchRate.toFixed(2) }}%</strong></div>
@@ -116,6 +212,31 @@ const submitReview = () => {
         <div><span>运行标识</span><strong>{{ run.id }}</strong></div>
         <div><span>构建链路</span><strong>{{ run.baselineVersion }} → {{ run.currentVersion }}</strong></div>
       </div>
+
+      <a-card class="version-panel" :bordered="false">
+        <div class="version-grid">
+          <div class="version-item" :class="{ behind: rulesBehind }">
+            <span>运行忽略规则版本</span>
+            <strong>v{{ run.rulesVersion ?? '-' }}</strong>
+            <small :class="{ warning: rulesBehind }">
+              当前有效规则 v{{ meta?.rulesVersion ?? '-' }} · {{ rulesBehind ? '落后，运行失效需重算' : '一致' }}
+            </small>
+          </div>
+          <div class="version-item" :class="{ behind: baselineBehind }">
+            <span>运行核对基线</span>
+            <strong>{{ run.baselineVersion }}</strong>
+            <small :class="{ warning: baselineBehind }">
+              当前有效基线 {{ activeBaseline?.version ?? '无' }} · {{ baselineBehind ? '落后，不能盖掉新基线' : '一致' }}
+            </small>
+          </div>
+          <div class="version-item">
+            <span>规则最近变更</span>
+            <strong>v{{ meta?.rulesVersion ?? '-' }}</strong>
+            <small>{{ meta?.changedBy }} · {{ meta?.updatedAt.slice(0, 16).replace('T', ' ') }}</small>
+          </div>
+        </div>
+        <p class="version-summary">{{ meta?.changeSummary }}</p>
+      </a-card>
 
       <div class="review-workspace">
         <div class="comparison-area">
@@ -176,13 +297,21 @@ const submitReview = () => {
 
           <a-divider />
 
-          <div class="panel-title">
+          <ApprovalEvidence :run="run" />
+
+          <div class="panel-title" style="margin-top: 12px">
             <div>
               <h3>评审结论</h3>
-              <span>原因、批准人和新版基线会永久留痕</span>
+              <span>冻结期内评审人与发布负责人在不同窗口提交，以先落地且版本核对通过者为准</span>
             </div>
           </div>
           <a-form :model="form" layout="vertical" @submit-success="submitReview">
+            <a-form-item label="提交窗口身份" :rules="[{ required: true }]">
+              <a-radio-group type="button" :model-value="form.role" @change="switchRole">
+                <a-radio value="reviewer">评审人窗口</a-radio>
+                <a-radio value="release-manager">发布负责人窗口</a-radio>
+              </a-radio-group>
+            </a-form-item>
             <a-form-item
               field="category"
               label="变化类型"
@@ -226,23 +355,19 @@ const submitReview = () => {
               />
             </a-form-item>
             <a-alert v-if="form.decision === 'approved'" type="warning" style="margin-bottom: 16px">
-              批准后只会新增基线版本，原基线仍可追溯，不会被覆盖。
+              批准前会再次核对规则版本 v{{ meta?.rulesVersion }} 与当前有效基线 {{ activeBaseline?.version ?? '—' }}；
+              版本落后或并发提交只会留下冲突说明，不会覆盖新基线。
             </a-alert>
-            <a-button html-type="submit" type="primary" long :loading="reviewMutation.isPending.value">
+            <a-button
+              html-type="submit"
+              type="primary"
+              long
+              :loading="reviewMutation.isPending.value"
+              :disabled="Boolean(run.lockedBatchId) || run.status === 'stale'"
+            >
               确认{{ form.decision === 'approved' ? '批准并创建基线' : '驳回' }}
             </a-button>
           </a-form>
-
-          <div v-if="run.review" class="review-record">
-            <h4>最近一次审批</h4>
-            <dl>
-              <dt>结论</dt><dd>{{ run.review.decision === 'approved' ? '已批准' : '已驳回' }}</dd>
-              <dt>类型</dt><dd>{{ run.review.category }}</dd>
-              <dt>人员</dt><dd>{{ run.review.reviewer }}</dd>
-              <dt>时间</dt><dd>{{ run.review.reviewedAt.slice(0, 16).replace('T', ' ') }}</dd>
-            </dl>
-            <p>{{ run.review.reason }}</p>
-          </div>
         </aside>
       </div>
     </template>

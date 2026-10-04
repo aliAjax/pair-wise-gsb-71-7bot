@@ -834,3 +834,94 @@ code {
     height: 590px;
   }
 }
+
+/* 版本核对面板与冲突/证据样式 */
+.version-panel {
+  margin-bottom: 16px;
+}
+
+.version-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.version-item {
+  padding: 12px 14px;
+  border: 1px solid #e5e6eb;
+  border-radius: 6px;
+  background: #f7f8fa;
+}
+
+.version-item.behind {
+  border-color: #ff7d00;
+  background: #fff7e8;
+}
+
+.version-item span,
+.version-item strong,
+.version-item small {
+  display: block;
+}
+
+.version-item span {
+  color: #86909c;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.version-item strong {
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.version-item small {
+  font-size: 11px;
+  color: #4e5969;
+}
+
+.version-item small.warning {
+  color: #d25f00;
+  font-weight: 600;
+}
+
+.version-summary {
+  margin: 10px 0 0;
+  color: #86909c;
+  font-size: 12px;
+}
+
+.evidence-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.evidence-cell .conflict-line {
+  color: #d25f00;
+  font-size: 11px;
+}
+
+.evidence-cell .stale-line {
+  color: #722ed1;
+  font-size: 11px;
+}
+
+.evidence-cell .locked-line {
+  color: #165dff;
+  font-size: 11px;
+}
+
+.batch-evidence {
+  padding: 10px 12px;
+  border-left: 3px solid #165dff;
+  background: #f2f7ff;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.batch-evidence p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #4e5969;
+}

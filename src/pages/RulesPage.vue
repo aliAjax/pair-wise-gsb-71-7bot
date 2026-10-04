@@ -2,7 +2,7 @@
 import { reactive, ref } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { Message, Modal } from '@arco-design/web-vue'
-import { createRule, deleteRule, getProjects, getRules, toggleRule } from '@/api/http'
+import { createRule, deleteRule, getMeta, getProjects, getRules, toggleRule } from '@/api/http'
 import type { IgnoreRule } from '@/types'
 
 const queryClient = useQueryClient()
@@ -19,8 +19,14 @@ const form = reactive({
 
 const { data: rules, isLoading } = useQuery({ queryKey: ['rules'], queryFn: getRules })
 const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: getProjects })
+const { data: meta } = useQuery({ queryKey: ['meta'], queryFn: getMeta })
 
-const refreshRules = async () => queryClient.invalidateQueries({ queryKey: ['rules'] })
+const refreshRules = async () => {
+  await queryClient.invalidateQueries({ queryKey: ['rules'] })
+  await queryClient.invalidateQueries({ queryKey: ['meta'] })
+  await queryClient.invalidateQueries({ queryKey: ['runs'] })
+  await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+}
 
 const createMutation = useMutation({
   mutationFn: createRule,
@@ -87,7 +93,9 @@ const projectName = (id: string) =>
   </section>
 
   <a-alert type="info" style="margin-bottom: 16px">
-    规则不会自动批准整张截图；启用后仅在差异报告中折叠匹配区域，高风险区域仍需人工判定。
+    当前规则集版本 <b>v{{ meta?.rulesVersion ?? '-' }}</b>（{{ meta?.changedBy }} · {{ meta?.updatedAt?.slice(0, 16).replace('T', ' ') }}）。
+    规则不会自动批准整张截图；任何新增、启停或删除都会使版本 +1，待审批运行自动失效并需重算，
+    已批准结论与已锁定发布批次继续使用原证据。
   </a-alert>
 
   <a-card class="table-panel" :bordered="false">
@@ -107,8 +115,11 @@ const projectName = (id: string) =>
         <a-table-column title="页面 / 设备" :width="180">
           <template #cell="{ record }">{{ record.pagePattern }} · {{ record.devicePattern }}</template>
         </a-table-column>
-        <a-table-column title="最大色差" :width="110">
+        <a-table-column title="最大色差" :width="100">
           <template #cell="{ record }">Δ {{ record.maxDelta }}</template>
+        </a-table-column>
+        <a-table-column title="修订版本" :width="90">
+          <template #cell="{ record }"><a-tag size="small">v{{ record.version ?? '-' }}</a-tag></template>
         </a-table-column>
         <a-table-column title="启用" :width="100">
           <template #cell="{ record }">

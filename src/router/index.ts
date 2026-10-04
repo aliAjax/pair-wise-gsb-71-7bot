@@ -13,6 +13,7 @@ const router = createRouter({
         { path: 'runs/:id', name: 'run-detail', component: () => import('@/pages/RunDetailPage.vue') },
         { path: 'approvals', name: 'approvals', component: () => import('@/pages/ApprovalsPage.vue') },
         { path: 'baselines', name: 'baselines', component: () => import('@/pages/BaselinesPage.vue') },
+        { path: 'freeze', name: 'freeze', component: () => import('@/pages/FreezeBatchesPage.vue') },
         { path: 'rules', name: 'rules', component: () => import('@/pages/RulesPage.vue') },
         { path: 'reports', name: 'reports', component: () => import('@/pages/ReportsPage.vue') },
       ],
