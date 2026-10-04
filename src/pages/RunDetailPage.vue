@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { Message } from '@arco-design/web-vue'
 import DiffCanvas from '@/components/DiffCanvas.vue'
 import StatusTag from '@/components/StatusTag.vue'
-import { getRun, reviewRun } from '@/api/http'
+import { getBaselines, getRun, reviewRun, ReviewConflictError } from '@/api/http'
 import { useReviewStore } from '@/stores/review'
 import type { DifferenceRegion, ReviewCategory } from '@/types'
 
@@ -35,6 +35,27 @@ const { data: run, isLoading } = useQuery({
   queryFn: () => getRun(runId.value),
 })
 
+const { data: baselines } = useQuery({
+  queryKey: ['baselines'],
+  queryFn: () => getBaselines(),
+})
+
+/** 提交人当前看到的有效基线，随审批请求上送用于服务端并发核对 */
+const activeBaseline = computed(() =>
+  run.value
+    ? (baselines.value ?? []).find(
+        (item) =>
+          item.projectId === run.value!.projectId &&
+          item.page === run.value!.page &&
+          item.device === run.value!.device &&
+          item.theme === run.value!.theme &&
+          item.active,
+      )
+    : undefined,
+)
+
+const isPending = computed(() => run.value?.status === 'pending')
+
 watch(
   run,
   (value) => {
@@ -58,7 +79,12 @@ const suspiciousPixels = computed(() =>
 )
 
 const reviewMutation = useMutation({
-  mutationFn: (payload: ReviewForm) => reviewRun(runId.value, payload),
+  mutationFn: (payload: ReviewForm) =>
+    reviewRun(runId.value, {
+      ...payload,
+      expectedRulesVersion: run.value?.rulesVersion ?? 0,
+      expectedBaselineId: activeBaseline.value?.id ?? null,
+    }),
   onSuccess: async (updated) => {
     Message.success(updated.review?.decision === 'approved' ? '审批通过，新基线已留痕' : '已驳回归并保留原基线')
     await queryClient.invalidateQueries({ queryKey: ['run', runId.value] })
@@ -67,7 +93,17 @@ const reviewMutation = useMutation({
     await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     await router.push('/approvals')
   },
-  onError: (error: Error) => Message.error(error.message),
+  onError: async (error: Error) => {
+    if (error instanceof ReviewConflictError) {
+      Message.error(error.message)
+      // 冲突已落库，刷新详情展示最新状态与冲突说明
+      await queryClient.invalidateQueries({ queryKey: ['run', runId.value] })
+      await queryClient.invalidateQueries({ queryKey: ['runs'] })
+      await queryClient.invalidateQueries({ queryKey: ['baselines'] })
+      return
+    }
+    Message.error(error.message)
+  },
 })
 
 const toggleIgnored = (target: DifferenceRegion) => {
@@ -83,6 +119,10 @@ const handleDifferenceFilter = (value: string | number | boolean) => {
 }
 
 const submitReview = () => {
+  if (!isPending.value) {
+    Message.warning('该运行已完成审批，不能重复提交')
+    return
+  }
   if (!form.reason.trim()) {
     Message.warning('请填写审批原因')
     return
@@ -104,17 +144,37 @@ const submitReview = () => {
         </div>
         <a-space>
           <a-button @click="router.push('/runs')"><icon-left /> 返回列表</a-button>
-          <a-button type="primary" :loading="reviewMutation.isPending.value" @click="submitReview">
-            <icon-check /> 提交审批
+          <a-button
+            type="primary"
+            :disabled="!isPending"
+            :loading="reviewMutation.isPending.value"
+            @click="submitReview"
+          >
+            <icon-check /> {{ isPending ? '提交审批' : '已完成审批' }}
           </a-button>
         </a-space>
       </section>
+
+      <a-alert v-if="run.recomputeReason && isPending" type="info" style="margin-bottom: 12px">
+        {{ run.recomputeReason }}（{{ run.recomputedAt?.slice(0, 16).replace('T', ' ') }}），请基于最新证据评审。
+      </a-alert>
+      <a-alert v-if="run.conflicts?.length" type="error" style="margin-bottom: 12px">
+        <template #title>存在 {{ run.conflicts.length }} 次未生效的并发提交</template>
+        <ul class="conflict-list">
+          <li v-for="(item, index) in run.conflicts" :key="index">
+            {{ item.reviewer }} 尝试{{ item.decision === 'approved' ? '批准' : '驳回' }}：{{ item.conflict }}
+            （{{ item.attemptedAt.slice(0, 16).replace('T', ' ') }}）
+          </li>
+        </ul>
+      </a-alert>
 
       <div class="run-facts">
         <div><span>差异率</span><strong :class="{ danger: run.mismatchRate >= 5 }">{{ run.mismatchRate.toFixed(2) }}%</strong></div>
         <div><span>待判定像素</span><strong>{{ suspiciousPixels.toLocaleString() }}</strong></div>
         <div><span>运行标识</span><strong>{{ run.id }}</strong></div>
         <div><span>构建链路</span><strong>{{ run.baselineVersion }} → {{ run.currentVersion }}</strong></div>
+        <div><span>证据规则版本</span><strong>v{{ run.rulesVersion }}</strong></div>
+        <div><span>当前有效基线</span><strong>{{ activeBaseline?.version ?? '无' }}</strong></div>
       </div>
 
       <div class="review-workspace">
@@ -182,7 +242,7 @@ const submitReview = () => {
               <span>原因、批准人和新版基线会永久留痕</span>
             </div>
           </div>
-          <a-form :model="form" layout="vertical" @submit-success="submitReview">
+          <a-form v-if="isPending" :model="form" layout="vertical" @submit-success="submitReview">
             <a-form-item
               field="category"
               label="变化类型"
@@ -240,6 +300,8 @@ const submitReview = () => {
               <dt>类型</dt><dd>{{ run.review.category }}</dd>
               <dt>人员</dt><dd>{{ run.review.reviewer }}</dd>
               <dt>时间</dt><dd>{{ run.review.reviewedAt.slice(0, 16).replace('T', ' ') }}</dd>
+              <dt>依据基线</dt><dd>{{ run.review.baselineVersion }}</dd>
+              <dt>规则版本</dt><dd>v{{ run.review.rulesVersion }}</dd>
             </dl>
             <p>{{ run.review.reason }}</p>
           </div>

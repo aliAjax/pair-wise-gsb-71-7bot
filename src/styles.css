@@ -439,7 +439,7 @@ code {
 
 .run-facts {
   display: grid;
-  grid-template-columns: 0.7fr 0.9fr 1fr 1.6fr;
+  grid-template-columns: 0.7fr 0.9fr 0.9fr 1.5fr 0.8fr 1.1fr;
   margin-bottom: 16px;
   border: 1px solid #e5e6eb;
   border-radius: 7px;
@@ -703,7 +703,7 @@ code {
 
 .review-record dl {
   display: grid;
-  grid-template-columns: 50px 1fr;
+  grid-template-columns: 64px 1fr;
   gap: 6px 10px;
   margin: 0;
   font-size: 11px;
@@ -789,6 +789,47 @@ code {
 
 .report-metrics {
   margin-bottom: 16px;
+}
+
+.conflict-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.batch-list {
+  display: grid;
+  gap: 2px;
+}
+
+.batch-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 150px 130px 90px;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  border-bottom: 1px solid #f2f3f5;
+}
+
+.batch-row:last-child {
+  border-bottom: 0;
+}
+
+.batch-main strong,
+.batch-main span {
+  display: block;
+}
+
+.batch-main strong {
+  margin-bottom: 3px;
+  font-size: 13px;
+}
+
+.batch-main span,
+.batch-meta {
+  color: #86909c;
+  font-size: 11px;
 }
 
 .evidence-cell strong,

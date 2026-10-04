@@ -4,6 +4,7 @@ import { Message } from '@arco-design/web-vue'
 import { useQuery } from '@tanstack/vue-query'
 import { getBaselines, getRuns } from '@/api/http'
 import StatusTag from '@/components/StatusTag.vue'
+import { decisionText, reviewBasisText } from '@/utils/review'
 
 const dateRange = ref('last-7-days')
 const { data: runs } = useQuery({ queryKey: ['runs', 'reports'], queryFn: () => getRuns() })
@@ -20,7 +21,23 @@ const escapeCsv = (value: string | number) => `"${String(value).replace(/"/g, '"
 
 const exportCsv = () => {
   const rows = [
-    ['运行ID', '页面', '设备', '主题', '构建', '状态', '差异率', '差异区域', '审批人', '审批原因'],
+    [
+      '运行ID',
+      '页面',
+      '设备',
+      '主题',
+      '构建',
+      '状态',
+      '差异率',
+      '差异区域',
+      '审批结论',
+      '审批人',
+      '审批时间',
+      '依据基线',
+      '规则版本',
+      '审批原因',
+      '并发冲突说明',
+    ],
     ...(runs.value ?? []).map((run) => [
       run.id,
       run.page,
@@ -30,8 +47,13 @@ const exportCsv = () => {
       run.status,
       run.mismatchRate.toFixed(2),
       run.regions.length,
+      decisionText(run),
       run.review?.reviewer ?? '',
+      run.review?.reviewedAt ?? '',
+      run.review?.baselineVersion ?? '',
+      run.review ? `v${run.review.rulesVersion}` : '',
       run.review?.reason ?? '',
+      (run.conflicts ?? []).map((item) => `${item.reviewer}：${item.conflict}`).join('；'),
     ]),
   ]
   const csv = `\uFEFF${rows.map((row) => row.map(escapeCsv).join(',')).join('\n')}`
@@ -88,9 +110,20 @@ const exportCsv = () => {
           <template #cell="{ record }">
             <div v-if="record.review" class="evidence-cell">
               <strong>{{ record.review.reviewer }} · {{ record.review.reviewedAt.slice(0, 10) }}</strong>
+              <span>{{ reviewBasisText(record) }}</span>
               <span>{{ record.review.reason }}</span>
             </div>
             <span v-else class="muted">尚未审批</span>
+          </template>
+        </a-table-column>
+        <a-table-column title="并发冲突" :width="220">
+          <template #cell="{ record }">
+            <div v-if="record.conflicts?.length" class="evidence-cell">
+              <span v-for="(item, index) in record.conflicts" :key="index">
+                {{ item.reviewer }}：{{ item.conflict }}
+              </span>
+            </div>
+            <span v-else class="muted">无</span>
           </template>
         </a-table-column>
       </template>

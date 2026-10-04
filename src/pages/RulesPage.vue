@@ -20,12 +20,18 @@ const form = reactive({
 const { data: rules, isLoading } = useQuery({ queryKey: ['rules'], queryFn: getRules })
 const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: getProjects })
 
-const refreshRules = async () => queryClient.invalidateQueries({ queryKey: ['rules'] })
+const refreshRules = async () => {
+  // 规则变更会让未锁定批次的待审批运行失效重算，相关视图都要刷新
+  await queryClient.invalidateQueries({ queryKey: ['rules'] })
+  await queryClient.invalidateQueries({ queryKey: ['runs'] })
+  await queryClient.invalidateQueries({ queryKey: ['run'] })
+  await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+}
 
 const createMutation = useMutation({
   mutationFn: createRule,
   onSuccess: async () => {
-    Message.success('忽略规则已创建')
+    Message.success('忽略规则已创建，待审批运行已按新规则重算')
     modalVisible.value = false
     Object.assign(form, {
       name: '',
@@ -43,14 +49,17 @@ const createMutation = useMutation({
 
 const toggleMutation = useMutation({
   mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => toggleRule(id, enabled),
-  onSuccess: refreshRules,
+  onSuccess: async () => {
+    Message.success('规则状态已更新，待审批运行已按新规则重算')
+    await refreshRules()
+  },
   onError: (error: Error) => Message.error(error.message),
 })
 
 const deleteMutation = useMutation({
   mutationFn: deleteRule,
   onSuccess: async () => {
-    Message.success('规则已删除')
+    Message.success('规则已删除，待审批运行已按新规则重算')
     await refreshRules()
   },
   onError: (error: Error) => Message.error(error.message),
@@ -87,7 +96,7 @@ const projectName = (id: string) =>
   </section>
 
   <a-alert type="info" style="margin-bottom: 16px">
-    规则不会自动批准整张截图；启用后仅在差异报告中折叠匹配区域，高风险区域仍需人工判定。
+    规则不会自动批准整张截图；启用后仅在差异报告中折叠匹配区域，高风险区域仍需人工判定。每次规则变更都会递增规则版本，未锁定批次的待审批运行会失效重算，已锁定的发布批次继续使用原证据。
   </a-alert>
 
   <a-card class="table-panel" :bordered="false">

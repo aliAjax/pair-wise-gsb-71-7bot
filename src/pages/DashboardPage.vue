@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/vue-query'
 import { getDashboard, getRuns } from '@/api/http'
 import MetricPanel from '@/components/MetricPanel.vue'
 import StatusTag from '@/components/StatusTag.vue'
+import { reviewBasisText } from '@/utils/review'
 
 const { data: dashboard, isLoading } = useQuery({
   queryKey: ['dashboard'],
@@ -84,7 +85,12 @@ const { data: runs } = useQuery({
             <template #cell="{ record }">{{ record.mismatchRate.toFixed(2) }}%</template>
           </a-table-column>
           <a-table-column title="状态">
-            <template #cell="{ record }"><StatusTag :status="record.status" /></template>
+            <template #cell="{ record }">
+              <StatusTag :status="record.status" />
+              <div v-if="record.review" class="muted" style="margin-top: 4px; font-size: 11px">
+                {{ reviewBasisText(record) }}
+              </div>
+            </template>
           </a-table-column>
           <a-table-column title="操作">
             <template #cell="{ record }"><router-link :to="`/runs/${record.id}`">打开评审</router-link></template>

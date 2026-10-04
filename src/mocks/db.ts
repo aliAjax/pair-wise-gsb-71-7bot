@@ -1,12 +1,16 @@
-import type { Baseline, DifferenceRegion, IgnoreRule, Project, ScreenshotRun } from '@/types'
+import type { Baseline, DifferenceRegion, IgnoreRule, Project, ReleaseBatch, ScreenshotRun } from '@/types'
 
 const STORAGE_KEY = 'visual-regression-platform-v1'
+const BACKUP_KEY = 'visual-regression-platform-v1-backup'
 
-interface Database {
+export interface Database {
   projects: Project[]
   runs: ScreenshotRun[]
   baselines: Baseline[]
   rules: IgnoreRule[]
+  batches: ReleaseBatch[]
+  /** 忽略规则的全局版本，任何规则增删改都会递增 */
+  rulesVersion: number
 }
 
 const projects: Project[] = [
@@ -52,6 +56,8 @@ const makeRegions = (prefix: string, intensity: number): DifferenceRegion[] => [
   },
 ]
 
+const SEED_RULES_VERSION = 3
+
 const runs: ScreenshotRun[] = [
   {
     id: 'run-1048',
@@ -67,6 +73,8 @@ const runs: ScreenshotRun[] = [
     baselineVersion: 'v6.17.4-baseline',
     currentVersion: 'v6.18.0-rc2',
     regions: makeRegions('1048', 1),
+    rulesVersion: SEED_RULES_VERSION,
+    baselineId: 'base-commerce-checkout',
   },
   {
     id: 'run-1047',
@@ -82,6 +90,8 @@ const runs: ScreenshotRun[] = [
     baselineVersion: 'v6.17.4-baseline',
     currentVersion: 'v6.18.0-rc2',
     regions: makeRegions('1047', 0.7),
+    rulesVersion: SEED_RULES_VERSION,
+    baselineId: 'base-commerce-list',
   },
   {
     id: 'run-1046',
@@ -97,12 +107,17 @@ const runs: ScreenshotRun[] = [
     baselineVersion: 'v5.9.1-baseline',
     currentVersion: 'billing-v3.7',
     regions: makeRegions('1046', 1.4),
+    rulesVersion: SEED_RULES_VERSION,
+    baselineId: 'base-console-billing',
     review: {
       category: 'design-change',
       decision: 'approved',
       reviewer: '林默',
       reason: '新计费周期列按需求上线，已核对设计稿和验收单。',
       reviewedAt: '2026-09-28T18:02:00+08:00',
+      rulesVersion: SEED_RULES_VERSION,
+      baselineId: 'base-console-billing',
+      baselineVersion: 'v5.9.1-baseline',
     },
   },
   {
@@ -119,12 +134,17 @@ const runs: ScreenshotRun[] = [
     baselineVersion: 'v2.4.0-baseline',
     currentVersion: 'campaign-v2',
     regions: makeRegions('1045', 2.2),
+    rulesVersion: SEED_RULES_VERSION,
+    baselineId: 'base-growth-campaign',
     review: {
       category: 'render-error',
       decision: 'rejected',
       reviewer: '梁琪',
       reason: '主操作区被侧栏遮挡，属于阻断性渲染异常。',
       reviewedAt: '2026-09-28T15:44:00+08:00',
+      rulesVersion: SEED_RULES_VERSION,
+      baselineId: 'base-growth-campaign',
+      baselineVersion: 'v2.4.0-baseline',
     },
   },
   {
@@ -141,6 +161,8 @@ const runs: ScreenshotRun[] = [
     baselineVersion: 'v5.9.1-baseline',
     currentVersion: 'v5.10.0-rc1',
     regions: makeRegions('1044', 0.9),
+    rulesVersion: SEED_RULES_VERSION,
+    baselineId: 'base-console-resource',
   },
   {
     id: 'run-1043',
@@ -156,6 +178,8 @@ const runs: ScreenshotRun[] = [
     baselineVersion: 'v2.5.3-baseline',
     currentVersion: 'v2.6.0-rc3',
     regions: makeRegions('1043', 0.5),
+    rulesVersion: SEED_RULES_VERSION,
+    baselineId: 'base-growth-home',
   },
 ]
 
@@ -174,6 +198,19 @@ const baselines: Baseline[] = [
     active: true,
   },
   {
+    id: 'base-console-billing-v3',
+    projectId: 'p-console',
+    page: '账单明细',
+    device: 'Desktop 1920',
+    theme: 'dark',
+    version: 'billing-v3.7',
+    approvedBy: '林默',
+    reason: '新计费周期列按需求上线，已核对设计稿和验收单。',
+    approvedAt: '2026-09-28T18:02:00+08:00',
+    runId: 'run-1046',
+    active: true,
+  },
+  {
     id: 'base-console-billing',
     projectId: 'p-console',
     page: '账单明细',
@@ -184,7 +221,7 @@ const baselines: Baseline[] = [
     reason: '升级账单表格主题变量，无业务布局变化。',
     approvedAt: '2026-09-12T14:05:00+08:00',
     runId: 'run-961',
-    active: true,
+    active: false,
   },
   {
     id: 'base-growth-campaign',
@@ -210,6 +247,32 @@ const baselines: Baseline[] = [
     reason: '商品卡信息密度调整完成，已通过交互验收。',
     approvedAt: '2026-09-20T16:40:00+08:00',
     runId: 'run-1002',
+    active: true,
+  },
+  {
+    id: 'base-console-resource',
+    projectId: 'p-console',
+    page: '资源详情',
+    device: 'Desktop 1440',
+    theme: 'light',
+    version: 'v5.9.1-baseline',
+    approvedBy: '周航',
+    reason: '资源详情页首版基线，覆盖核心指标卡。',
+    approvedAt: '2026-09-10T10:00:00+08:00',
+    runId: 'run-955',
+    active: true,
+  },
+  {
+    id: 'base-growth-home',
+    projectId: 'p-growth',
+    page: '运营首页',
+    device: 'Desktop 1440',
+    theme: 'light',
+    version: 'v2.5.3-baseline',
+    approvedBy: '许薇',
+    reason: '推荐位改版验收通过，固化为首页基线。',
+    approvedAt: '2026-09-15T09:20:00+08:00',
+    runId: 'run-990',
     active: true,
   },
 ]
@@ -261,24 +324,184 @@ const rules: IgnoreRule[] = [
   },
 ]
 
-const seed = (): Database => ({ projects, runs, baselines, rules })
+const batches: ReleaseBatch[] = [
+  {
+    id: 'batch-6.18-freeze',
+    name: '6.18.0 发布冻结批次',
+    projectId: 'p-commerce',
+    build: 'release/6.18.0',
+    locked: false,
+  },
+  {
+    id: 'batch-billing-v3',
+    name: 'billing-v3 已锁定批次',
+    projectId: 'p-console',
+    build: 'feature/billing-v3',
+    locked: true,
+    lockedBy: '周航',
+    lockedAt: '2026-09-28T19:00:00+08:00',
+    lockedRulesVersion: SEED_RULES_VERSION,
+  },
+  {
+    id: 'batch-5.10',
+    name: '5.10.0 发布批次',
+    projectId: 'p-console',
+    build: 'release/5.10.0',
+    locked: false,
+  },
+  {
+    id: 'batch-2.6',
+    name: '2.6.0 发布批次',
+    projectId: 'p-growth',
+    build: 'release/2.6.0',
+    locked: false,
+  },
+  {
+    id: 'batch-campaign',
+    name: 'campaign-editor 批次',
+    projectId: 'p-growth',
+    build: 'feature/campaign-editor',
+    locked: false,
+  },
+]
 
-export const readDb = (): Database => {
-  const raw = localStorage.getItem(STORAGE_KEY)
-  if (!raw) {
-    const initial = seed()
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(initial))
-    return initial
+const seed = (): Database => ({
+  projects,
+  runs,
+  baselines,
+  rules,
+  batches,
+  rulesVersion: SEED_RULES_VERSION,
+})
+
+const baselineKey = (baseline: Pick<Baseline, 'projectId' | 'page' | 'device' | 'theme'>) =>
+  [baseline.projectId, baseline.page, baseline.device, baseline.theme].join('|')
+
+/**
+ * 修复历史遗留数据，保证两条硬性状态约束：
+ * 1. 已批准的运行必须留有历史基线；
+ * 2. 同一项目 + 页面 + 设备 + 主题下最多只有一条有效基线。
+ */
+const repairDb = (db: Database): Database => {
+  for (const run of db.runs) {
+    if (run.status !== 'approved' || !run.review) continue
+    const hasBaseline = db.baselines.some((baseline) => baseline.runId === run.id)
+    if (!hasBaseline) {
+      db.baselines.unshift({
+        id: `base-repaired-${run.id}`,
+        projectId: run.projectId,
+        page: run.page,
+        device: run.device,
+        theme: run.theme,
+        version: run.currentVersion,
+        approvedBy: run.review.reviewer,
+        reason: run.review.reason,
+        approvedAt: run.review.reviewedAt,
+        runId: run.id,
+        active: true,
+      })
+    }
   }
-  try {
-    return JSON.parse(raw) as Database
-  } catch {
-    const initial = seed()
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(initial))
-    return initial
+  const activeByKey = new Map<string, Baseline[]>()
+  for (const baseline of db.baselines) {
+    if (!baseline.active) continue
+    const key = baselineKey(baseline)
+    const list = activeByKey.get(key) ?? []
+    list.push(baseline)
+    activeByKey.set(key, list)
+  }
+  for (const list of activeByKey.values()) {
+    if (list.length <= 1) continue
+    list.sort((a, b) => b.approvedAt.localeCompare(a.approvedAt))
+    for (const stale of list.slice(1)) stale.active = false
+  }
+  return db
+}
+
+/** 兼容旧版本本地数据：补齐新增字段 */
+const migrate = (raw: Partial<Database>): Database => {
+  const base = seed()
+  const db: Database = {
+    projects: raw.projects ?? base.projects,
+    runs: raw.runs ?? base.runs,
+    baselines: raw.baselines ?? base.baselines,
+    rules: raw.rules ?? base.rules,
+    batches: raw.batches ?? base.batches,
+    rulesVersion: typeof raw.rulesVersion === 'number' ? raw.rulesVersion : SEED_RULES_VERSION,
+  }
+  for (const run of db.runs) {
+    if (typeof run.rulesVersion !== 'number') run.rulesVersion = db.rulesVersion
+  }
+  return repairDb(db)
+}
+
+/**
+ * 写入前校验状态约束，违反约束的数据一律不落库，
+ * 避免出现“运行已批准却没有历史基线”或“同页面设备两条有效基线”的状态。
+ */
+const assertInvariants = (db: Database): void => {
+  for (const run of db.runs) {
+    if (run.status !== 'approved') continue
+    const hasBaseline = db.baselines.some((baseline) => baseline.runId === run.id)
+    if (!hasBaseline) {
+      throw new Error(`运行 ${run.id} 已批准但缺少历史基线，本次写入已取消`)
+    }
+  }
+  const activeKeys = new Set<string>()
+  for (const baseline of db.baselines) {
+    if (!baseline.active) continue
+    const key = baselineKey(baseline)
+    if (activeKeys.has(key)) {
+      throw new Error(`页面「${baseline.page} · ${baseline.device}」存在两条有效基线，本次写入已取消`)
+    }
+    activeKeys.add(key)
   }
 }
 
+export const readDb = (): Database => {
+  const raw = localStorage.getItem(STORAGE_KEY)
+  if (raw) {
+    try {
+      return migrate(JSON.parse(raw) as Partial<Database>)
+    } catch {
+      // 主记录损坏，尝试从最近完整记录恢复
+    }
+  }
+  const backup = localStorage.getItem(BACKUP_KEY)
+  if (backup) {
+    try {
+      const recovered = migrate(JSON.parse(backup) as Partial<Database>)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(recovered))
+      return recovered
+    } catch {
+      // 备份同样不可用，退回种子数据
+    }
+  }
+  const initial = seed()
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(initial))
+  return initial
+}
+
+/**
+ * 事务式写入：先把当前完整记录存入备份键，再写主记录。
+ * 任何一步失败都会回滚到最近完整记录，并向调用方抛错。
+ */
 export const writeDb = (db: Database): void => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(db))
+  assertInvariants(db)
+  const next = JSON.stringify(db)
+  const previous = localStorage.getItem(STORAGE_KEY)
+  try {
+    if (previous !== null) localStorage.setItem(BACKUP_KEY, previous)
+    localStorage.setItem(STORAGE_KEY, next)
+  } catch (error) {
+    try {
+      if (previous !== null) localStorage.setItem(STORAGE_KEY, previous)
+      else localStorage.removeItem(STORAGE_KEY)
+    } catch {
+      // 回滚也失败时保留现场，下次读取会尝试从备份恢复
+    }
+    throw new Error(
+      `写入失败，已从最近完整记录恢复：${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
 }

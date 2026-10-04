@@ -29,6 +29,20 @@ export interface ReviewRecord {
   reviewer: string
   reason: string
   reviewedAt: string
+  /** 审批时核对通过的忽略规则版本 */
+  rulesVersion: number
+  /** 审批时核对通过的当前有效基线 */
+  baselineId?: string
+  baselineVersion: string
+}
+
+export interface ReviewConflict {
+  reviewer: string
+  decision: 'approved' | 'rejected'
+  reason: string
+  /** 冲突说明：为什么这次提交没有生效 */
+  conflict: string
+  attemptedAt: string
 }
 
 export interface ScreenshotRun {
@@ -49,6 +63,27 @@ export interface ScreenshotRun {
   regions: DifferenceRegion[]
   review?: ReviewRecord
   mergedRunIds?: string[]
+  /** 差异证据计算时使用的忽略规则版本 */
+  rulesVersion: number
+  /** 差异对照使用的基线记录 */
+  baselineId?: string
+  /** 规则变更后证据被重算的时间与原因 */
+  recomputedAt?: string
+  recomputeReason?: string
+  /** 并发审批被拒绝时留下的冲突说明 */
+  conflicts?: ReviewConflict[]
+}
+
+export interface ReleaseBatch {
+  id: string
+  name: string
+  projectId: string
+  build: string
+  locked: boolean
+  lockedBy?: string
+  lockedAt?: string
+  /** 锁定时快照的忽略规则版本，锁定批次继续按原证据审批 */
+  lockedRulesVersion?: number
 }
 
 export interface Baseline {
@@ -100,6 +135,10 @@ export interface ReviewPayload {
   decision: 'approved' | 'rejected'
   reviewer: string
   reason: string
+  /** 提交人打开页面时看到的忽略规则版本，用于并发核对 */
+  expectedRulesVersion: number
+  /** 提交人打开页面时看到的当前有效基线，null 表示当时没有有效基线 */
+  expectedBaselineId: string | null
 }
 
 export interface ImportRunPayload {

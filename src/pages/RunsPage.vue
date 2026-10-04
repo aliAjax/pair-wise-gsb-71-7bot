@@ -5,6 +5,7 @@ import { Message, type FileItem } from '@arco-design/web-vue'
 import { getProjects, getRuns, importRuns, mergeRuns } from '@/api/http'
 import StatusTag from '@/components/StatusTag.vue'
 import { useReviewStore } from '@/stores/review'
+import { reviewBasisText } from '@/utils/review'
 
 const filters = reactive({
   projectId: '',
@@ -238,8 +239,14 @@ const submitImport = async () => {
         <a-table-column title="差异区域" :width="100">
           <template #cell="{ record }">{{ record.regions.length }} 处</template>
         </a-table-column>
-        <a-table-column title="状态" :width="100">
-          <template #cell="{ record }"><StatusTag :status="record.status" /></template>
+        <a-table-column title="状态 / 审批依据" :width="200">
+          <template #cell="{ record }">
+            <StatusTag :status="record.status" />
+            <div v-if="record.review" class="sub-text">{{ reviewBasisText(record) }}</div>
+            <div v-else-if="record.conflicts?.length" class="sub-text danger">
+              {{ record.conflicts.length }} 次并发提交未生效
+            </div>
+          </template>
         </a-table-column>
         <a-table-column title="操作" :width="110" fixed="right">
           <template #cell="{ record }"><router-link :to="`/runs/${record.id}`">差异定位</router-link></template>

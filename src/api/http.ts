@@ -1,15 +1,26 @@
 import axios, { type AxiosAdapter, type InternalAxiosRequestConfig } from 'axios'
-import { readDb, writeDb } from '@/mocks/db'
+import { readDb, writeDb, type Database } from '@/mocks/db'
 import type {
   Baseline,
   DashboardData,
   IgnoreRule,
   ImportRunPayload,
   Project,
+  ReleaseBatch,
   ReviewPayload,
   RunFilters,
   ScreenshotRun,
 } from '@/types'
+
+/** 并发审批冲突：提交基于的规则版本或基线已落后，本次不生效但会留下冲突说明 */
+export class ReviewConflictError extends Error {
+  readonly status = 409
+
+  constructor(message: string) {
+    super(message)
+    this.name = 'ReviewConflictError'
+  }
+}
 
 export const api = axios.create({
   baseURL: '/mock-api',
@@ -28,6 +39,62 @@ const respond = <T>(config: InternalAxiosRequestConfig, data: T, status = 200) =
 const parseBody = <T>(config: InternalAxiosRequestConfig): T => {
   if (typeof config.data === 'string') return JSON.parse(config.data) as T
   return config.data as T
+}
+
+const findBatchForRun = (db: Database, run: ScreenshotRun): ReleaseBatch | undefined =>
+  db.batches.find((batch) => batch.projectId === run.projectId && batch.build === run.build)
+
+const findActiveBaseline = (db: Database, run: ScreenshotRun): Baseline | undefined =>
+  db.baselines.find(
+    (item) =>
+      item.projectId === run.projectId &&
+      item.page === run.page &&
+      item.device === run.device &&
+      item.theme === run.theme &&
+      item.active,
+  )
+
+const statusLabel = (run: ScreenshotRun): string => {
+  if (run.status === 'approved') return '已批准'
+  if (run.status === 'rejected') return '已驳回'
+  if (run.status === 'merged') return '已合并'
+  return '待审批'
+}
+
+/**
+ * 忽略规则变更后：全局规则版本递增，所有未锁定批次里的待审批运行
+ * 按新规则失效重算；已锁定的发布批次继续使用原证据，不受影响。
+ */
+const recomputePendingRuns = (db: Database): number => {
+  let recomputed = 0
+  for (const run of db.runs) {
+    if (run.status !== 'pending') continue
+    if (findBatchForRun(db, run)?.locked) continue
+    const pixelsBefore = run.regions
+      .filter((region) => !region.ignored)
+      .reduce((sum, region) => sum + region.pixels, 0)
+    let regionsChanged = false
+    for (const region of run.regions) {
+      if (!region.ignored || !region.ruleId) continue
+      const rule = db.rules.find((item) => item.id === region.ruleId)
+      if (!rule || !rule.enabled) {
+        region.ignored = false
+        delete region.ruleId
+        regionsChanged = true
+      }
+    }
+    if (regionsChanged && pixelsBefore > 0) {
+      const pixelsAfter = run.regions
+        .filter((region) => !region.ignored)
+        .reduce((sum, region) => sum + region.pixels, 0)
+      run.mismatchRate = Number((run.mismatchRate * (pixelsAfter / pixelsBefore)).toFixed(2))
+    }
+    run.rulesVersion = db.rulesVersion
+    run.recomputedAt = new Date().toISOString()
+    run.recomputeReason = `忽略规则已变更，证据按规则 v${db.rulesVersion} 重算`
+    recomputed += 1
+  }
+  return recomputed
 }
 
 const mockAdapter: AxiosAdapter = async (config) => {
@@ -93,21 +160,55 @@ const mockAdapter: AxiosAdapter = async (config) => {
     const payload = parseBody<ReviewPayload>(config)
     const run = db.runs.find((item) => item.id === reviewMatch[1])
     if (!run) throw new Error('运行记录不存在')
+
+    // 审批前核对：以服务端当前状态为准，校验提交方看到的规则版本与有效基线
+    const activeBaseline = findActiveBaseline(db, run)
+    const currentBaselineId = activeBaseline?.id ?? null
+    const conflicts: string[] = []
+    if (run.status !== 'pending') {
+      conflicts.push(
+        `该运行已由 ${run.review?.reviewer ?? '其他评审人'} 处理为「${statusLabel(run)}」，本次提交未生效`,
+      )
+    }
+    if (payload.expectedRulesVersion !== run.rulesVersion) {
+      conflicts.push(
+        `忽略规则已更新到 v${run.rulesVersion}（本次提交基于 v${payload.expectedRulesVersion}），差异证据已重算，请刷新后重新评审`,
+      )
+    }
+    if (payload.expectedBaselineId !== currentBaselineId) {
+      conflicts.push(
+        `当前有效基线已变为 ${activeBaseline?.version ?? '无'}${
+          activeBaseline ? `（${activeBaseline.approvedBy} 批准）` : ''
+        }，落后的一方不能覆盖新基线`,
+      )
+    }
+    if (conflicts.length > 0) {
+      // 落后的一方：不改状态、不动基线，只留冲突说明
+      run.conflicts = run.conflicts ?? []
+      run.conflicts.unshift({
+        reviewer: payload.reviewer,
+        decision: payload.decision,
+        reason: payload.reason,
+        conflict: conflicts.join('；'),
+        attemptedAt: new Date().toISOString(),
+      })
+      writeDb(db)
+      throw new ReviewConflictError(`提交未生效，已保留冲突说明：${conflicts.join('；')}`)
+    }
+
     run.status = payload.decision
     run.review = {
-      ...payload,
+      category: payload.category,
+      decision: payload.decision,
+      reviewer: payload.reviewer,
+      reason: payload.reason,
       reviewedAt: new Date().toISOString(),
+      rulesVersion: run.rulesVersion,
+      baselineId: currentBaselineId ?? undefined,
+      baselineVersion: activeBaseline?.version ?? run.baselineVersion,
     }
     if (payload.decision === 'approved') {
-      const baseline = db.baselines.find(
-        (item) =>
-          item.projectId === run.projectId &&
-          item.page === run.page &&
-          item.device === run.device &&
-          item.theme === run.theme &&
-          item.active,
-      )
-      if (baseline) baseline.active = false
+      if (activeBaseline) activeBaseline.active = false
       db.baselines.unshift({
         id: `base-${Date.now()}`,
         projectId: run.projectId,
@@ -170,6 +271,7 @@ const mockAdapter: AxiosAdapter = async (config) => {
         currentVersion: payload.currentVersion.trim() || payload.build.trim(),
         baselineImage: payload.baselineImage,
         currentImage: file.dataUrl,
+        rulesVersion: db.rulesVersion,
         regions: [
           {
             id: `${runId}-r1`,
@@ -197,9 +299,34 @@ const mockAdapter: AxiosAdapter = async (config) => {
       }
       return run
     })
+    for (const run of imported) {
+      run.baselineId = findActiveBaseline(db, run)?.id
+    }
     db.runs.unshift(...imported)
     writeDb(db)
     return respond(config, imported, 201)
+  }
+
+  if (method === 'get' && path === '/batches') {
+    return respond<ReleaseBatch[]>(config, db.batches)
+  }
+
+  if (method === 'post' && path === '/batches/lock') {
+    const payload = parseBody<{ id: string; locked: boolean; operator: string }>(config)
+    const batch = db.batches.find((item) => item.id === payload.id)
+    if (!batch) throw new Error('发布批次不存在')
+    batch.locked = payload.locked
+    if (payload.locked) {
+      batch.lockedBy = payload.operator
+      batch.lockedAt = new Date().toISOString()
+      batch.lockedRulesVersion = db.rulesVersion
+    } else {
+      delete batch.lockedBy
+      delete batch.lockedAt
+      delete batch.lockedRulesVersion
+    }
+    writeDb(db)
+    return respond(config, batch)
   }
 
   if (method === 'get' && path === '/baselines') {
@@ -222,6 +349,8 @@ const mockAdapter: AxiosAdapter = async (config) => {
       createdAt: new Date().toISOString(),
     }
     db.rules.unshift(rule)
+    db.rulesVersion += 1
+    recomputePendingRuns(db)
     writeDb(db)
     return respond(config, rule, 201)
   }
@@ -232,6 +361,8 @@ const mockAdapter: AxiosAdapter = async (config) => {
     const rule = db.rules.find((item) => item.id === ruleMatch[1])
     if (!rule) throw new Error('规则不存在')
     Object.assign(rule, payload)
+    db.rulesVersion += 1
+    recomputePendingRuns(db)
     writeDb(db)
     return respond(config, rule)
   }
@@ -239,6 +370,8 @@ const mockAdapter: AxiosAdapter = async (config) => {
     const index = db.rules.findIndex((item) => item.id === ruleMatch[1])
     if (index < 0) throw new Error('规则不存在')
     db.rules.splice(index, 1)
+    db.rulesVersion += 1
+    recomputePendingRuns(db)
     writeDb(db)
     return respond(config, { success: true })
   }
@@ -263,6 +396,14 @@ export const importRuns = async (payload: ImportRunPayload): Promise<ScreenshotR
   (await api.post<ScreenshotRun[]>('/runs/import', payload)).data
 export const getBaselines = async (projectId?: string): Promise<Baseline[]> =>
   (await api.get<Baseline[]>('/baselines', { params: { projectId } })).data
+export const getBatches = async (): Promise<ReleaseBatch[]> =>
+  (await api.get<ReleaseBatch[]>('/batches')).data
+export const setBatchLock = async (
+  id: string,
+  locked: boolean,
+  operator: string,
+): Promise<ReleaseBatch> =>
+  (await api.post<ReleaseBatch>('/batches/lock', { id, locked, operator })).data
 export const getRules = async (): Promise<IgnoreRule[]> =>
   (await api.get<IgnoreRule[]>('/rules')).data
 export const createRule = async (
